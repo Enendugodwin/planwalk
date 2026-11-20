@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f3efe6" />
+    <meta
+      name="description"
+      content="Planwalk — turn a floor plan into an editable, dimension-aware 3D space."
+    />
+    <title>Planwalk — floor plans, made walkable</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23a95e3f'/%3E%3Cpath d='M9 23V11l7-4 7 4v12' fill='none' stroke='%23fbf9f4' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M13 23v-6h6v6' fill='none' stroke='%23fbf9f4' stroke-width='2'/%3E%3C/svg%3E" />
+    <style>
+      #bootStatus {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        background: #f3efe6;
+        color: #25231e;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        place-items: center;
+        padding: 24px;
+      }
+      #bootStatus.is-visible {
+        display: grid;
+      }
+      #bootStatus .boot-card {
+        max-width: 560px;
+        background: #fbf9f4;
+        border: 1px solid #ddd6c6;
+        border-radius: 18px;
+        padding: 28px;
+        box-shadow: 0 24px 60px -28px rgba(40, 34, 22, 0.4);
+      }
+      #bootStatus h1 {
+        font-family: Georgia, serif;
+        font-size: 26px;
+        font-weight: 500;
+        margin: 0 0 10px;
+      }
+      #bootStatus p {
+        font-size: 14px;
+        line-height: 1.6;
+        color: #5f5a50;
+        margin: 0 0 12px;
+      }
+      #bootStatus code {
+        display: block;
+        background: #f3efe6;
+        border: 1px solid #e3dccd;
+        border-radius: 8px;
+        padding: 8px 10px;
+        margin: 8px 0;
+        font-family: Consolas, monospace;
+        font-size: 12px;
+      }
+      #bootStatus a {
+        color: #86452b;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="bootStatus" role="alert">
+      <div class="boot-card">
+        <h1>Planwalk didn’t start</h1>
+        <p>
+          Planwalk is a Vite app, so it must be opened through a local server —
+          not by double-clicking <strong>index.html</strong>. Browsers block the
+          app's JavaScript when it is opened from the file system.
+        </p>
+        <p>From the <code style="display:inline;padding:2px 4px">planwalk</code> folder, run:</p>
+        <code>npm install</code>
+        <code>npm start</code>
+        <p>Then open <a href="http://localhost:5180">http://localhost:5180</a>. On Windows you can also double-click <strong>start-planwalk.cmd</strong>.</p>
+        <p style="margin-bottom:0">If the server is already running, check the browser console for the error that prevented startup.</p>
+      </div>
+    </div>
+    <div id="app" class="app">
+      <header id="topbar" class="topbar"></header>
+      <div id="workspace" class="workspace" data-view="3d">
+        <aside id="leftRail" class="rail rail-left" aria-label="Project and plan"></aside>
+        <main id="stageWrap" class="stage-wrap">
+          <div id="stage" class="stage" aria-label="3D model"></div>
+        </main>
+        <aside id="inspector" class="rail rail-right" aria-label="Inspector"></aside>
+      </div>
+      <div id="composer" class="composer"></div>
+    </div>
+    <div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
+    <div id="modalRoot"></div>
+    <script>
+      // If the module fails to load (for example when index.html is opened
+      // directly from disk), show setup instructions instead of a blank page.
+      window.setTimeout(function () {
+        if (!window.__PLANWALK_BOOTED__) {
+          document.getElementById("bootStatus")?.classList.add("is-visible");
+        }
+      }, 4500);
+    </script>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

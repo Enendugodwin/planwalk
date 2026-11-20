@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.env.local
+.firebase/
+*.log
+*.planwalk.json
+.DS_Store
+Thumbs.db
