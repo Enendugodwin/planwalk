@@ -12,6 +12,8 @@ import { metersPerUnit } from "../model/units.js";
 import { clamp, deepClone, uid } from "../util.js";
 
 const EPS = 0.001;
+const WALLS = ["n", "e", "s", "w"];
+const WALL_INSET = 0.035;
 
 function rotCosSin(rotation) {
   return { c: Math.cos(rotation || 0), s: Math.sin(rotation || 0) };
@@ -212,8 +214,8 @@ export function findWallSpot(project, room, item, opts = {}) {
   const mpu = metersPerUnit(project);
   const width = (opts.dims?.w || item.dims.w) / mpu;
   const near = opts.near || roomCenter(room);
-  const preferredWall = opts.wall || nearestWall(room, near.x, near.y);
-  const order = [preferredWall, "n", "e", "s", "w"].filter((w, i, arr) => arr.indexOf(w) === i);
+  const preferredWall = WALLS.includes(opts.wall) ? opts.wall : nearestWall(room, near.x, near.y);
+  const order = [preferredWall, ...WALLS].filter((wall, index, list) => list.indexOf(wall) === index);
 
   for (const wall of order) {
     const wallLength = wall === "n" || wall === "s" ? room.w : room.h;
@@ -428,9 +430,30 @@ export function setObjectPosition(id, x, y, label = "Move item") {
   store.commit(label, (draft) => {
     const target = draft.objects.find((o) => o.id === id);
     if (!target) return;
+    const room = draft.rooms.find((r) => r.id === target.roomId);
+    let nextX = Number(x);
+    let nextY = Number(y);
+    if (!Number.isFinite(nextX) || !Number.isFinite(nextY)) {
+      outcome = { ok: false, message: "That position isn't valid." };
+      return;
+    }
+
+    if (target.placement === "wall" && room) {
+      const wall = WALLS.includes(target.wall) ? target.wall : nearestWall(room, nextX, nextY);
+      const half = Math.min(target.dims.w / metersPerUnit(draft), (wall === "n" || wall === "s" ? room.w : room.h)) / 2;
+      target.wall = wall;
+      if (wall === "n" || wall === "s") {
+        nextY = wall === "n" ? room.y + WALL_INSET : room.y + room.h - WALL_INSET;
+        nextX = clamp(nextX, room.x + half, room.x + room.w - half);
+      } else {
+        nextX = wall === "w" ? room.x + WALL_INSET : room.x + room.w - WALL_INSET;
+        nextY = clamp(nextY, room.y + half, room.y + room.h - half);
+      }
+    }
+
     const previous = { x: target.x, y: target.y };
-    target.x = Number(x);
-    target.y = Number(y);
+    target.x = nextX;
+    target.y = nextY;
     if (target.placement === "floor") {
       const check = canPlaceObject(draft, target);
       if (!check.ok) {
@@ -451,12 +474,15 @@ export function nudgeObject(id, dx, dy) {
   const next = { x: object.x + dx, y: object.y + dy };
   // Keep wall-mounted items on their wall.
   if (object.placement === "wall") {
+    const mpu = metersPerUnit(store.project);
+    const wallLength = object.wall === "n" || object.wall === "s" ? room.w : room.h;
+    const half = Math.min(object.dims.w / mpu, wallLength) / 2;
     if (object.wall === "n" || object.wall === "s") {
-      next.x = clamp(next.x, room.x + 0.1, room.x + room.w - 0.1);
+      next.x = clamp(next.x, room.x + half, room.x + room.w - half);
       if (object.wall === "n") next.y = room.y + 0.035;
       if (object.wall === "s") next.y = room.y + room.h - 0.035;
     } else {
-      next.y = clamp(next.y, room.y + 0.1, room.y + room.h - 0.1);
+      next.y = clamp(next.y, room.y + half, room.y + room.h - half);
       if (object.wall === "w") next.x = room.x + 0.035;
       if (object.wall === "e") next.x = room.x + room.w - 0.035;
     }

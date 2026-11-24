@@ -123,12 +123,11 @@ class Store {
     return this.future.length > 0;
   }
 
-  _snapshot() {
-    const clone = deepClone(this.state.project);
+  _snapshot(project = this.state.project) {
     // Plan images never change during history-tracked edits; excluding them
-    // keeps undo snapshots small.
-    if (clone.plan) clone.plan.src = null;
-    return JSON.stringify(clone);
+    // keeps undo snapshots small. Stringify directly instead of cloning the
+    // whole project first so large plan data URLs are not copied per edit.
+    return JSON.stringify(project, (key, value) => (key === "src" ? undefined : value));
   }
 
   _restore(snapshot) {
@@ -161,8 +160,11 @@ class Store {
     const draft = deepClone(this.state.project);
     const result = mutator(draft);
     const next = result && typeof result === "object" ? result : draft;
+    // Compare before touching meta.updatedAt so a no-op edit (for example an
+    // AI proposal whose target disappeared) does not create an undo step.
+    const changed = history && this._snapshot(next) !== before;
     touchProject(next);
-    if (history) {
+    if (changed) {
       this.past.push({ label: label || "Edit", snapshot: before });
       if (this.past.length > HISTORY_LIMIT) this.past.shift();
       this.future.length = 0;
@@ -366,10 +368,16 @@ class Store {
   }
 
   markExported() {
-    this.state.saveStatus = "exported";
-    this.state.exportedAt = new Date().toISOString();
-    this.state.saveError = "";
-    this.emit("save");
+    // Flush any pending draft first, otherwise its timer would fire shortly
+    // after the export and overwrite the "file saved" status.
+    clearTimeout(this._saveTimer);
+    this._saveDraft();
+    if (this.state.saveStatus !== "error") {
+      this.state.saveStatus = "exported";
+      this.state.exportedAt = new Date().toISOString();
+      this.state.saveError = "";
+      this.emit("save");
+    }
   }
 
   markDirtyNoSave() {

@@ -1,4 +1,4 @@
-import { CATALOG, CATALOG_BY_ID, findNamedColor } from "../data/catalog.js";
+import { CATALOG_BY_ID, findNamedColor } from "../data/catalog.js";
 import { objectDisplayName } from "../model/project.js";
 import { uid } from "../util.js";
 
@@ -168,24 +168,18 @@ function materialsFor(color, surface) {
   return { name: color.name, color: color.hex, kind };
 }
 
-function describeMaterial(room, surface, color, allRooms) {
+function describeMaterial(room, surface, color) {
   const paint = color.name.toLowerCase();
   if (surface === "floor") {
-    return allRooms
-      ? `Set every floor to ${paint}`
-      : `Set the ${room.name.toLowerCase()} floor to ${paint}`;
+    return `Set the ${room.name.toLowerCase()} floor to ${paint}`;
   }
   if (surface === "ceiling") {
-    return allRooms
-      ? `Paint all ceilings ${paint}`
-      : `Paint the ${room.name.toLowerCase()} ceiling ${paint}`;
+    return `Paint the ${room.name.toLowerCase()} ceiling ${paint}`;
   }
-  return allRooms
-    ? `Paint all walls ${paint}`
-    : `Paint the ${room.name.toLowerCase()} walls ${paint}`;
+  return `Paint the ${room.name.toLowerCase()} walls ${paint}`;
 }
 
-function surfaceEdit(room, surface, color, allRooms) {
+function surfaceEdit(room, surface, color) {
   return {
     type: "room-material",
     roomId: room.id,
@@ -193,7 +187,7 @@ function surfaceEdit(room, surface, color, allRooms) {
     name: color.name,
     color: color.hex,
     kind: materialsFor(color, surface).kind,
-    description: describeMaterial(room, surface, color, allRooms),
+    description: describeMaterial(room, surface, color),
   };
 }
 
@@ -257,20 +251,21 @@ export function interpretPromptRules(text, project, selection = {}, opts = {}) {
     : null;
 
   const segments = raw
-    .split(/\s*(?:,|;|\.| and then | and )\s*/i)
+    // Split on sentence punctuation, but not on decimal points such as "45.5°".
+    .split(/\s*(?:,|;|\.(?=\s|$)| and then | and )\s*/i)
     .map((segment) => segment.trim())
     .filter(Boolean);
 
   const edits = [];
   let usedDefaultRoom = false;
+  let appliedAllRooms = false;
   let carriedRooms = forcedRoom ? [forcedRoom] : globalAll ? project.rooms : globalRooms.map((m) => m.room);
   let lastAddedId = null;
   let lastAddedType = null;
   let unresolvedAdd = null;
   let note = "";
 
-  const resolveRooms = (segment) => {
-    const local = matchRooms(project, segment);
+  const resolveRooms = (segment, local = matchRooms(project, segment)) => {
     if (local.length) {
       carriedRooms = local.map((m) => m.room);
       return carriedRooms;
@@ -290,8 +285,10 @@ export function interpretPromptRules(text, project, selection = {}, opts = {}) {
     const surfaces = detectSurfaces(seg);
     const color = findNamedColor(seg);
     const furniture = detectFurniture(seg);
-    const targetRooms = resolveRooms(segment);
-    const allRooms = globalAll || (ALL_WORDS.test(seg) && surfaces.length > 0);
+    const explicitRooms = matchRooms(project, segment);
+    const targetRooms = resolveRooms(segment, explicitRooms);
+    // "all floors" means every room only when the segment doesn't name a room.
+    const allRooms = !explicitRooms.length && ALL_WORDS.test(seg) && surfaces.length > 0;
 
     const unknownRoom = seg.match(
       /\b(?:in|into|to|inside)\s+the\s+(nursery|garage|attic|balcony|terrace|basement|loft|guest room|kids room|dining room|utility room|laundry room)\b/
@@ -337,10 +334,11 @@ export function interpretPromptRules(text, project, selection = {}, opts = {}) {
       if (!targetRooms.length) {
         return clarify(raw, "Which room should I update?", optionRooms(project), "No room matched that request.");
       }
+      if (allRooms) appliedAllRooms = true;
       for (const surface of surfaces) {
         const rooms = allRooms ? project.rooms : targetRooms;
         for (const room of rooms) {
-          edits.push(surfaceEdit(room, surface, color, allRooms));
+          edits.push(surfaceEdit(room, surface, color));
         }
       }
       continue;
@@ -382,14 +380,15 @@ export function interpretPromptRules(text, project, selection = {}, opts = {}) {
           item.type,
           selectedObject
         )[0];
-        if (!target) {
+        const rotateId = target?.id || (lastAddedId && lastAddedType === item.type ? lastAddedId : null);
+        if (!rotateId) {
           return noMatch(`There's no ${def.name.toLowerCase()} to turn in this room yet.`);
         }
         const degrees = parseDegrees(seg);
         const faceWindow = /(window|view|light)/.test(seg);
         edits.push({
           type: "rotate-object",
-          objectId: target.id,
+          objectId: rotateId,
           mode: faceWindow ? "face-window" : "angle",
           degrees: degrees ?? (faceWindow ? undefined : 90),
           description: faceWindow
@@ -400,19 +399,39 @@ export function interpretPromptRules(text, project, selection = {}, opts = {}) {
       }
 
       if (isAdd) {
-        if (!targetRooms.length) {
+        const addRooms = explicitRooms.length
+          ? explicitRooms.map((m) => m.room)
+          : forcedRoom
+            ? [forcedRoom]
+            : selectedRoom
+              ? [selectedRoom]
+              : [];
+        if (!addRooms.length) {
           unresolvedAdd = { item, def, color, raw };
           continue;
         }
-        if (allRooms) {
+        if (addRooms.length > 1) {
           return clarify(raw, "Which room should the new piece go in?", optionRooms(project), "Multi-room placement isn't automatic.");
         }
-        const room = targetRooms[0];
-        const anchor = furniture.length > 1
-          ? furniture.slice(1).map((f) => objectsOfType(project, [room.id], f.type)[0]).find(Boolean)
-          : null;
+        if (!explicitRooms.length && !forcedRoom) usedDefaultRoom = true;
+        let room = addRooms[0];
+
+        // Only wall-hung items can be anchored above existing furniture. When
+        // the prompt doesn't name a room, find the anchor first and add the
+        // piece to the room that actually contains it.
+        let anchor = null;
+        if (def.placement === "wall" && furniture.length > 1) {
+          const anchorPool = explicitRooms.length ? addRooms : project.rooms;
+          for (const candidate of furniture.slice(1)) {
+            anchor = objectsOfType(project, anchorPool.map((r) => r.id), candidate.type)[0] || null;
+            if (anchor) break;
+          }
+        }
+        if (anchor && !explicitRooms.length) {
+          room = project.rooms.find((r) => r.id === anchor.roomId) || room;
+        }
+
         const objectId = uid("obj");
-        const wallItem = def.placement === "wall";
         edits.push({
           type: "add-object",
           objectId,
@@ -455,14 +474,23 @@ export function interpretPromptRules(text, project, selection = {}, opts = {}) {
       }
     }
 
-    // "Rotate it toward the window" after an add in the same request.
-    if (lastAddedId && ROTATE_VERBS.test(seg) && /window|view/.test(seg)) {
+    // "Rotate it toward the window" / "rotate it 45°" after an add.
+    if (
+      lastAddedId &&
+      ROTATE_VERBS.test(seg) &&
+      (/\b(it|this|that|selected)\b/.test(seg) || /window|view|light/.test(seg))
+    ) {
       const def = CATALOG_BY_ID[lastAddedType];
+      const degrees = parseDegrees(seg);
+      const faceWindow = /window|view|light/.test(seg);
       edits.push({
         type: "rotate-object",
         objectId: lastAddedId,
-        mode: "face-window",
-        description: `Turn the ${def.name.toLowerCase()} toward the window`,
+        mode: faceWindow ? "face-window" : "angle",
+        degrees: faceWindow ? undefined : degrees ?? 90,
+        description: faceWindow
+          ? `Turn the ${def.name.toLowerCase()} toward the window`
+          : `Rotate the ${def.name.toLowerCase()} ${degrees ?? 90}°`,
       });
       continue;
     }
@@ -486,14 +514,14 @@ export function interpretPromptRules(text, project, selection = {}, opts = {}) {
     // Colour-only phrasing, e.g. "make it sage".
     if (color && !furniture.length && !surfaces.length && /paint|make|colour|color|change/.test(seg) && targetRooms.length) {
       for (const room of targetRooms) {
-        edits.push(surfaceEdit(room, "wall", color, false));
+        edits.push(surfaceEdit(room, "wall", color));
       }
     }
   }
 
   // A trailing "rotate it toward the window" may have been consumed before
   // the add segment was processed; add it now if the prompt contains both.
-  if (lastAddedId && /rotate|turn/.test(normalized) && /window/.test(normalized)) {
+  if (lastAddedId && /rotate|turn/.test(normalized) && /window|view|light/.test(normalized)) {
     const already = edits.some((e) => e.type === "rotate-object" && e.objectId === lastAddedId);
     if (!already) {
       const def = CATALOG_BY_ID[lastAddedType];
@@ -531,7 +559,7 @@ export function interpretPromptRules(text, project, selection = {}, opts = {}) {
   const confidence = usedDefaultRoom ? 0.68 : 0.92;
 
   if (usedDefaultRoom) note = "Using the room you have selected.";
-  if (globalAll) note = "Applying to every room.";
+  if (appliedAllRooms) note = "Applying to every room.";
 
   return {
     source: "rules",

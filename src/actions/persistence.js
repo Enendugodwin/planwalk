@@ -63,6 +63,8 @@ export function triggerOpenProject() {
       input.remove();
     }
   });
+  // Chrome fires "cancel" when the file picker is dismissed without a file.
+  input.addEventListener("cancel", () => input.remove());
   document.body.appendChild(input);
   input.click();
 }

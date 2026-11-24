@@ -121,9 +121,10 @@ export function validatePlanAI(data) {
   return { rooms, openings, warnings };
 }
 
-export async function interpretPlanImage({ dataUrl, width, height }) {
+export async function interpretPlanImage({ dataUrl }) {
   const prepared = await prepareImageForAI(dataUrl);
-  const prompt = `${PLAN_SYSTEM_PROMPT}\n\n${planUserPrompt(width, height)}`;
+  // Use the dimensions of the image actually sent, not the original upload.
+  const prompt = `${PLAN_SYSTEM_PROMPT}\n\n${planUserPrompt(prepared.width, prepared.height)}`;
   const { data, inferenceSource } = await generateStructured({
     prompt,
     image: { data: prepared.data, mimeType: prepared.mimeType },

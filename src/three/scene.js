@@ -7,8 +7,6 @@ import { toast } from "../ui/toast.js";
 import { buildFurniture } from "./furniture.js";
 import { canPlaceObject, describeCollision } from "../actions/scene.js";
 import {
-  findObject,
-  findRoom,
   nearestWall,
   openingFrame,
   projectArea,
@@ -17,7 +15,6 @@ import {
   roomCenter,
 } from "../model/project.js";
 import {
-  displayLengthNumber,
   formatArea,
   formatCeiling,
   formatLength,
@@ -566,8 +563,12 @@ class Stage {
       transient: false,
       mpu,
     };
-    this.renderer.domElement.setPointerCapture?.(event.pointerId);
     this.renderer.domElement.style.cursor = "grabbing";
+    try {
+      this.renderer.domElement.setPointerCapture?.(event.pointerId);
+    } catch {
+      /* pointer capture is best-effort */
+    }
     event.preventDefault();
   }
 
@@ -632,7 +633,11 @@ class Stage {
     const drag = this.moveDrag;
     if (!drag) return;
     this.moveDrag = null;
-    this.renderer.domElement.releasePointerCapture?.(drag.pointerId);
+    try {
+      this.renderer.domElement.releasePointerCapture?.(drag.pointerId);
+    } catch {
+      /* pointer capture may already be gone */
+    }
     if (drag.transient) store.endTransient({ commit: true });
     if (drag.invalid) {
       toast("Placement blocked", {
@@ -704,7 +709,6 @@ class Stage {
       return;
     }
     this.pill.hidden = false;
-    const unit = isCalibrated(state.project) && state.project.unitSystem === "imperial" ? "ft²" : null;
     const calibrated = room.measurement === "calibrated";
     if (object) {
       const dims = object.dims;
@@ -1646,6 +1650,9 @@ class Stage {
   _enterWalk() {
     const room = store.selectedRoom || this.project.rooms[0];
     if (!room) return;
+    // A pending orbit/top camera move would otherwise keep overwriting the
+    // walkthrough camera for the next few hundred milliseconds.
+    this.animation = null;
     const mpu = metersPerUnit(this.project);
     const start = this._walkStartPoint(room, mpu);
     const eye = Math.min(EYE_HEIGHT, room.ceilingHeight - 0.18);

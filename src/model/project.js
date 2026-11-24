@@ -3,6 +3,8 @@ import { clamp, deepClone, uid } from "../util.js";
 import { metersPerUnit } from "./units.js";
 
 const WALLS = ["n", "e", "s", "w"];
+const HEX_COLOR = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+const WALL_INSET = 0.035;
 
 function normalizeRoomWalls(raw) {
   const walls = {};
@@ -89,6 +91,7 @@ export function normalizeProject(input) {
 
   const roomIds = new Set(project.rooms.map((room) => room.id));
 
+  const seenOpeningIds = new Set();
   project.openings = Array.isArray(project.openings)
     ? project.openings
         .filter((opening) => roomIds.has(opening.roomId))
@@ -97,8 +100,10 @@ export function normalizeProject(input) {
           const wall = WALLS.includes(opening.wall) ? opening.wall : "n";
           const wallLength = wall === "n" || wall === "s" ? room.w : room.h;
           const width = Math.max(0.25, num(opening.width, 0.9));
+          const id = opening.id && !seenOpeningIds.has(opening.id) ? opening.id : uid("opening");
+          seenOpeningIds.add(id);
           return {
-            id: opening.id || uid("opening"),
+            id,
             roomId: opening.roomId,
             type: opening.type === "window" ? "window" : "door",
             wall,
@@ -111,10 +116,16 @@ export function normalizeProject(input) {
         })
     : [];
 
+  const seenObjectIds = new Set();
   project.objects = Array.isArray(project.objects)
     ? project.objects
         .filter((object) => CATALOG_BY_ID[object.type] && roomIds.has(object.roomId))
-        .map((object) => normalizeObject(object, project.rooms.find((r) => r.id === object.roomId)))
+        .map((object) => {
+          const normalized = normalizeObject(object, project.rooms.find((r) => r.id === object.roomId));
+          if (!normalized.id || seenObjectIds.has(normalized.id)) normalized.id = uid("obj");
+          seenObjectIds.add(normalized.id);
+          return normalized;
+        })
     : [];
 
   project.plan.width = Math.max(1, project.plan.width);
@@ -133,7 +144,7 @@ function normalizeMaterial(material, surface, index) {
   if (!material) return fallback;
   return {
     name: String(material.name || fallback.name),
-    color: /^#[0-9a-f]{3,8}$/i.test(material.color || "") ? material.color : fallback.color,
+    color: HEX_COLOR.test(material.color || "") ? material.color : fallback.color,
     kind: String(material.kind || material.material || fallback.kind),
   };
 }
@@ -142,29 +153,62 @@ export function normalizeObject(object, room) {
   const def = CATALOG_BY_ID[object.type];
   const dims = object.dims || {};
   const placement = def.placement || "floor";
+  const size = {
+    w: clamp(num(dims.w, def.dims.w), 0.05, 12),
+    d: clamp(num(dims.d, def.dims.d), 0.02, 12),
+    h: clamp(num(dims.h, def.dims.h), 0.02, 5),
+  };
+  const x = num(object.x, room ? room.x + room.w / 2 : 0);
+  const y = num(object.y, room ? room.y + room.h / 2 : 0);
+
+  let wall = WALLS.includes(object.wall) ? object.wall : null;
+  if (placement === "wall") {
+    wall = wall || (room ? nearestWall(room, x, y) : null);
+  }
+
+  let elevation;
+  if (placement === "ceiling") {
+    elevation = num(object.elevation, room ? room.ceilingHeight - size.h / 2 : 2.4);
+  } else if (placement === "wall") {
+    elevation = num(object.elevation, 1.5);
+  } else {
+    elevation = num(object.elevation, 0);
+  }
+
   const normalized = {
     id: object.id || uid("obj"),
     type: object.type,
     roomId: object.roomId,
     name: object.name || def.name,
-    x: num(object.x, room ? room.x + room.w / 2 : 0),
-    y: num(object.y, room ? room.y + room.h / 2 : 0),
+    x,
+    y,
     rotation: num(object.rotation, 0),
-    dims: {
-      w: clamp(num(dims.w, def.dims.w), 0.05, 12),
-      d: clamp(num(dims.d, def.dims.d), 0.02, 12),
-      h: clamp(num(dims.h, def.dims.h), 0.02, 5),
-    },
-    color: /^#[0-9a-f]{3,8}$/i.test(object.color || "") ? object.color : def.color,
-    accent: /^#[0-9a-f]{3,8}$/i.test(object.accent || "") ? object.accent : def.accent || null,
+    dims: size,
+    color: HEX_COLOR.test(object.color || "") ? object.color : def.color,
+    accent: HEX_COLOR.test(object.accent || "") ? object.accent : def.accent || null,
     placement: placement === "ceiling" ? "ceiling" : placement === "wall" ? "wall" : "floor",
-    elevation: clamp(num(object.elevation, placement === "wall" ? 1.5 : 0), 0, 4),
-    wall: WALLS.includes(object.wall) ? object.wall : null,
+    elevation: clamp(elevation, 0, 5),
+    wall: placement === "wall" ? wall : null,
     texture: ["smooth", "fabric", "wood", "stone", "metal", "tile", "concrete", "carpet"].includes(object.texture)
       ? object.texture
       : "smooth",
     locked: Boolean(object.locked),
   };
+
+  // Imported or legacy wall items may be off their wall. Snap them onto the
+  // correct plane and keep them within the wall span so drag/nudge behaviour
+  // stays predictable.
+  if (normalized.placement === "wall" && room && normalized.wall) {
+    const half = Math.min(size.w, normalized.wall === "n" || normalized.wall === "s" ? room.w : room.h) / 2;
+    if (normalized.wall === "n" || normalized.wall === "s") {
+      normalized.y = normalized.wall === "n" ? room.y + WALL_INSET : room.y + room.h - WALL_INSET;
+      normalized.x = clamp(normalized.x, room.x + half, room.x + room.w - half);
+    } else {
+      normalized.x = normalized.wall === "w" ? room.x + WALL_INSET : room.x + room.w - WALL_INSET;
+      normalized.y = clamp(normalized.y, room.y + half, room.y + room.h - half);
+    }
+  }
+
   return normalized;
 }
 

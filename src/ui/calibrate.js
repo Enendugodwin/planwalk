@@ -1,6 +1,6 @@
 import { store } from "../store.js";
 import { loadImage } from "../ai/plan.js";
-import { formatLength, metersPerUnit } from "../model/units.js";
+import { formatLength } from "../model/units.js";
 import { icon } from "./icons.js";
 import { openModal } from "./modal.js";
 import { ScalePicker } from "./scalePicker.js";
@@ -44,7 +44,7 @@ export function openCalibrationModal() {
       <div class="field-grid" style="margin-top:12px">
         <div class="field">
           <label for="knownLength">Known length</label>
-          <input id="knownLength" class="input" type="number" min="0.1" step="0.1" value="5" autofocus />
+          <input id="knownLength" class="input" type="number" inputmode="decimal" min="0.1" step="0.1" value="5" autofocus />
         </div>
         <div class="field">
           <label for="knownUnit">Unit</label>
@@ -86,7 +86,7 @@ export function openCalibrationModal() {
           return;
         }
         const mpu = knownMeters / (state.sourceDistance / 100);
-        preview.dataset.tone = "warn";
+        preview.dataset.tone = "";
         preview.innerHTML = `${icon("ruler", 14)}<span>${state.sourceDistance.toFixed(0)} px ≈ ${knownMeters.toFixed(2)} m. That makes one plan unit ≈ ${mpu.toFixed(3)} m. Rooms currently sized in plan units will be interpreted with this scale.</span>`;
       };
 

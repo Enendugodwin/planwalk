@@ -1,6 +1,4 @@
 import { store } from "../store.js";
-import { formatArea, isCalibrated } from "../model/units.js";
-import { projectArea } from "../model/project.js";
 import { saveProjectFile } from "../actions/persistence.js";
 import { openAISettings } from "./aiPanel.js";
 import { icon } from "./icons.js";
@@ -47,7 +45,7 @@ export function mountTopbar() {
     </div>
     <div class="topbar-center">
       <input id="projectTitle" class="project-title" type="text" maxlength="80" aria-label="Project name" />
-      <span id="saveStatus" class="save-status" data-state="new"></span>
+      <span id="saveStatus" class="save-status" data-state="new" role="status" aria-live="polite"></span>
     </div>
     <div class="topbar-actions">
       <button type="button" class="icon-btn" id="undoBtn" aria-label="Undo" title="Undo (Ctrl+Z)">${icon("undo", 15)}</button>

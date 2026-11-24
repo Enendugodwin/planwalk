@@ -4,10 +4,9 @@ import { buildUploadedProject, interpretPlanImage, layoutFromNormalized, loadIma
 import {
   displayLengthNumber,
   formatLength,
-  isCalibrated,
   parseDisplayLength,
 } from "../model/units.js";
-import { clamp, escapeHtml, slugify } from "../util.js";
+import { clamp, escapeHtml } from "../util.js";
 import { icon } from "./icons.js";
 import { openModal } from "./modal.js";
 import { openAISettings, openConsentModal } from "./aiPanel.js";
@@ -53,24 +52,33 @@ async function renderPdfPage(file, pageNumber = 1) {
   pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
   const buffer = await file.arrayBuffer();
   const doc = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
-  const page = await doc.getPage(clamp(pageNumber, 1, doc.numPages));
-  const base = page.getViewport({ scale: 1 });
-  const scale = Math.min(2.4, 2000 / Math.max(base.width, base.height));
-  const viewport = page.getViewport({ scale });
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(viewport.width);
-  canvas.height = Math.round(viewport.height);
-  const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  await page.render({ canvasContext: ctx, viewport }).promise;
-  return {
-    dataUrl: canvas.toDataURL("image/png"),
-    width: canvas.width,
-    height: canvas.height,
-    pages: doc.numPages,
-    pageNumber: clamp(pageNumber, 1, doc.numPages),
-  };
+  const pageCount = doc.numPages;
+  try {
+    const page = await doc.getPage(clamp(pageNumber, 1, pageCount));
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.min(2.4, 2000 / Math.max(base.width, base.height));
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    return {
+      dataUrl: canvas.toDataURL("image/png"),
+      width: canvas.width,
+      height: canvas.height,
+      pages: pageCount,
+      pageNumber: clamp(pageNumber, 1, pageCount),
+    };
+  } finally {
+    try {
+      await doc.destroy();
+    } catch {
+      /* the document may already be gone */
+    }
+  }
 }
 
 /**
@@ -107,6 +115,7 @@ export function openUploadWizard() {
   let picker = null;
   let api = null;
   let reviewCanvas = null;
+  let fileToken = 0;
 
   function calibratedProject() {
     return {
@@ -184,7 +193,6 @@ export function openUploadWizard() {
       `;
       api.footer.querySelector("#wizardBack").addEventListener("click", () => setStep(1));
       api.footer.querySelector("#wizardSkip")?.addEventListener("click", () => {
-        state.calibration = null;
         proceedFromScale(false);
       });
       api.footer.querySelector("#wizardScaleNext").addEventListener("click", () => proceedFromScale(true));
@@ -234,7 +242,7 @@ export function openUploadWizard() {
                     ? `<div class="field-grid" style="margin-top:12px">
                         <div class="field">
                           <label for="pdfPageInput">PDF page</label>
-                          <input id="pdfPageInput" class="input" type="number" min="1" max="${state.pdfPages}" value="${state.pdfPage}" />
+                          <input id="pdfPageInput" class="input" type="number" inputmode="numeric" min="1" max="${state.pdfPages}" value="${state.pdfPage}" />
                         </div>
                         <div class="field" style="justify-content:flex-end">
                           <button type="button" class="btn" id="renderPageBtn">${icon("file", 14)} Render page</button>
@@ -304,6 +312,7 @@ export function openUploadWizard() {
       if (file) handleFile(file);
     });
     api.body.querySelector("#removeFile")?.addEventListener("click", () => {
+      fileToken += 1;
       state.dataUrl = null;
       state.fileName = "";
       state.isPdf = false;
@@ -311,6 +320,16 @@ export function openUploadWizard() {
       state.pdfPage = 1;
       state.pdfFile = null;
       state.readError = "";
+      state.imageWidth = 0;
+      state.imageHeight = 0;
+      state.calibration = null;
+      state.scaleDistance = null;
+      state.layout = null;
+      state.layoutSource = { kind: "none", inferenceSource: null };
+      state.aiError = "";
+      state.aiWarnings = [];
+      state.selectedRoomId = null;
+      state.reading = false;
       render();
     });
     api.body.querySelector("#sampleInstead")?.addEventListener("click", () => {
@@ -320,7 +339,7 @@ export function openUploadWizard() {
     });
     api.body.querySelector("#renderPageBtn")?.addEventListener("click", async () => {
       const page = Number(api.body.querySelector("#pdfPageInput")?.value) || 1;
-      await loadPdf(fileForPdf(), page);
+      await loadPdf(fileForPdf(), page, ++fileToken);
     });
   }
 
@@ -346,14 +365,30 @@ export function openUploadWizard() {
       render();
       return;
     }
+    const token = ++fileToken;
     state.fileName = fileBaseName(file.name);
     state.projectName = fileBaseName(file.name);
     state.fileType = file.type;
+    // A new image invalidates any scale or layout derived from the old one.
+    state.dataUrl = null;
+    state.imageWidth = 0;
+    state.imageHeight = 0;
+    state.calibration = null;
+    state.scaleDistance = null;
+    state.layout = null;
+    state.layoutSource = { kind: "none", inferenceSource: null };
+    state.aiError = "";
+    state.aiWarnings = [];
+    state.selectedRoomId = null;
+    state.pdfPages = 0;
+    state.pdfPage = 1;
+    state.pdfFile = null;
+    state.reading = false;
     if (isPdf) {
       state.pdfFile = file;
       state.isPdf = true;
       state.dataUrl = null;
-      await loadPdf(file, 1);
+      await loadPdf(file, 1, token);
     } else {
       state.isPdf = false;
       state.pdfPages = 0;
@@ -364,12 +399,15 @@ export function openUploadWizard() {
           reader.onerror = () => reject(reader.error);
           reader.readAsDataURL(file);
         });
+        if (token !== fileToken) return;
         const prepared = await prepareImageData(raw, file.type || (file.name.endsWith(".png") ? "image/png" : "image/jpeg"));
+        if (token !== fileToken) return;
         state.dataUrl = prepared.dataUrl;
         state.imageWidth = prepared.width;
         state.imageHeight = prepared.height;
         render();
       } catch (error) {
+        if (token !== fileToken) return;
         console.error("[planwalk] image read failed", error);
         state.readError = "That image could not be read. Try exporting it as a PNG, JPEG, or WebP.";
         render();
@@ -377,13 +415,28 @@ export function openUploadWizard() {
     }
   }
 
-  async function loadPdf(file, pageNumber) {
+  async function loadPdf(file, pageNumber, token = fileToken) {
     if (!file) return;
     state.reading = true;
     state.readError = "";
     try {
       const page = await renderPdfPage(file, pageNumber);
+      if (token !== fileToken) return;
       const prepared = await prepareImageData(page.dataUrl, "image/png");
+      if (token !== fileToken) return;
+      const pageChanged =
+        state.pdfPage !== page.pageNumber ||
+        state.imageWidth !== prepared.width ||
+        state.imageHeight !== prepared.height;
+      if (pageChanged) {
+        state.calibration = null;
+        state.scaleDistance = null;
+        state.layout = null;
+        state.layoutSource = { kind: "none", inferenceSource: null };
+        state.aiError = "";
+        state.aiWarnings = [];
+        state.selectedRoomId = null;
+      }
       state.dataUrl = prepared.dataUrl;
       state.imageWidth = prepared.width;
       state.imageHeight = prepared.height;
@@ -391,11 +444,15 @@ export function openUploadWizard() {
       state.pdfPage = page.pageNumber;
       state.isPdf = true;
     } catch (error) {
-      console.error("[planwalk] PDF render failed", error);
-      state.readError = "That PDF page could not be rendered. Try exporting the plan as a PNG or JPEG.";
+      if (token === fileToken) {
+        console.error("[planwalk] PDF render failed", error);
+        state.readError = "That PDF page could not be rendered. Try exporting the plan as a PNG or JPEG.";
+      }
     } finally {
-      state.reading = false;
-      render();
+      if (token === fileToken) {
+        state.reading = false;
+        render();
+      }
     }
   }
 
@@ -414,7 +471,7 @@ export function openUploadWizard() {
           <div class="field-grid" style="margin-top:12px">
             <div class="field">
               <label for="scaleLength">Known length</label>
-              <input id="scaleLength" class="input" type="number" min="0.1" step="0.1" value="${state.scaleKnown}" />
+              <input id="scaleLength" class="input" type="number" inputmode="decimal" min="0.1" step="0.1" value="${state.scaleKnown}" />
             </div>
             <div class="field">
               <label for="scaleUnit">Unit</label>
@@ -444,7 +501,6 @@ export function openUploadWizard() {
     const lengthInput = api.body.querySelector("#scaleLength");
     const unitInput = api.body.querySelector("#scaleUnit");
     const result = api.body.querySelector("#scaleResult");
-    const nextBtn = api.footer.querySelector("#wizardScaleNext");
     if (!canvas || !state.dataUrl) return;
 
     state.scaleKnown = Number(lengthInput.value) || 5;
@@ -523,8 +579,6 @@ export function openUploadWizard() {
       try {
         const result = await interpretPlanImage({
           dataUrl: state.dataUrl,
-          width: state.imageWidth,
-          height: state.imageHeight,
         });
         const layout = layoutFromNormalized(result, state.imageWidth, state.imageHeight);
         state.layout = layout;
@@ -542,10 +596,7 @@ export function openUploadWizard() {
     } else {
       const layout = starterLayout(state.imageWidth, state.imageHeight);
       state.layout = layout;
-      state.layoutSource = {
-        kind: state.aiError ? "starter" : "starter",
-        inferenceSource: null,
-      };
+      state.layoutSource = { kind: "starter", inferenceSource: null };
       state.selectedRoomId = layout.rooms[0]?.id || null;
     }
     state.busy = false;
@@ -603,7 +654,7 @@ export function openUploadWizard() {
         return `
           <div class="review-room" data-room-id="${room.id}" data-selected="${isSel}" role="button" tabindex="0" aria-label="Room ${escapeHtml(room.name)}">
             <div class="review-room-top">
-              <input class="input" data-field="name" value="${escapeHtml(room.name)}" aria-label="Room name" />
+              <input class="input" data-room-field="name" data-owner="${room.id}" value="${escapeHtml(room.name)}" maxlength="48" aria-label="Room name" />
               <span class="tag" data-tone="info" data-measure>${Math.round((room.confidence || 0) * 100)}%</span>
               <button type="button" class="icon-btn" data-remove-room="${room.id}" aria-label="Remove ${escapeHtml(room.name)}">${icon("trash", 13)}</button>
             </div>
@@ -662,7 +713,7 @@ export function openUploadWizard() {
       <div class="field">
         <label>${label}</label>
         <div class="input-unit">
-          <input class="input" type="number" step="0.01" value="${value}" data-room-field="${field}" data-owner="${roomId}" aria-label="${label}" />
+          <input class="input" type="number" inputmode="decimal" step="0.01" value="${value}" data-room-field="${field}" data-owner="${roomId}" aria-label="${label}" />
           <span class="unit">${unit}</span>
         </div>
       </div>
@@ -1055,9 +1106,9 @@ export function openUploadWizard() {
       scaleReference: state.calibration?.reference || null,
     });
     project.unitSystem = store.project.unitSystem;
-  if (state.isPdf) {
-    project.plan = { ...project.plan, name: `${state.projectName} — page ${state.pdfPage}` };
-  }
+    if (state.isPdf) {
+      project.plan = { ...project.plan, name: `${state.projectName} — page ${state.pdfPage}` };
+    }
     store.replaceProject(project, { source: "upload" });
     store.setMobileView("3d");
     api.close();
@@ -1078,6 +1129,7 @@ export function openUploadWizard() {
     footer: "",
     onMount: (mounted) => {
       api = mounted;
+      window.addEventListener("resize", sizeReviewCanvas);
       render();
     },
     onClose: () => {

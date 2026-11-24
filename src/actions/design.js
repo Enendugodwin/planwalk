@@ -44,10 +44,19 @@ export function setObjectTexture(id, texture) {
 }
 
 export function setObjectRotation(id, rotation) {
+  let outcome = { ok: true, message: "" };
   store.commit("Rotate item", (draft) => {
     const target = draft.objects.find((o) => o.id === id);
-    if (target) target.rotation = ((Number(rotation) || 0) + Math.PI * 4) % (Math.PI * 2);
+    if (!target) return;
+    target.rotation = ((Number(rotation) || 0) + Math.PI * 4) % (Math.PI * 2);
+    if (target.placement === "floor") {
+      const check = canPlaceObject(draft, target);
+      if (!check.ok) {
+        outcome = { ok: false, collision: true, message: describeCollision(draft, check) };
+      }
+    }
   });
+  return outcome;
 }
 
 export function updateRoomField(roomId, field, value) {
@@ -171,9 +180,10 @@ export function applyEditPlan(plan) {
             warnings.push("A furniture edit referenced an item that isn't available.");
             continue;
           }
-          const anchor = edit.anchorObjectId
+          const anchorCandidate = edit.anchorObjectId
             ? draft.objects.find((o) => o.id === edit.anchorObjectId)
             : null;
+          const anchor = anchorCandidate && anchorCandidate.roomId === room.id ? anchorCandidate : null;
           const result = makeCatalogObject(draft, room, edit.catalogType, {
             id: edit.objectId,
             color: edit.color,
@@ -241,8 +251,14 @@ export function applyEditPlan(plan) {
         } else if (edit.type === "move-object") {
           const object = draft.objects.find((o) => o.id === edit.objectId);
           if (!object) continue;
-          object.x = Number(edit.x);
-          object.y = Number(edit.y);
+          const nextX = Number(edit.x);
+          const nextY = Number(edit.y);
+          if (!Number.isFinite(nextX) || !Number.isFinite(nextY)) {
+            warnings.push("A move edit had an invalid position.");
+            continue;
+          }
+          object.x = nextX;
+          object.y = nextY;
           const check = canPlaceObject(draft, object);
           if (!check.ok) warnings.push(describeCollision(draft, check));
           applied += 1;

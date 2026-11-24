@@ -124,7 +124,10 @@ function validateAIData(data, project) {
         continue;
       }
       const color = resolveColor(raw);
-      const anchor = raw.anchorObjectId ? objects.get(raw.anchorObjectId) : null;
+      const anchorCandidate = raw.anchorObjectId ? objects.get(raw.anchorObjectId) : null;
+      // An anchor in another room would place the new item against the wrong
+      // wall; ignore it rather than producing a confusing result.
+      const anchor = anchorCandidate && anchorCandidate.roomId === room.id ? anchorCandidate : null;
       const objectId = uid("obj");
       edits.push({
         type: "add-object",

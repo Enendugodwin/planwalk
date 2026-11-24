@@ -94,6 +94,16 @@ export function updateComposer(state, reason = "change") {
     renderChips();
     renderPreview();
   }
+  // A proposal is only valid for the scene it was built against. Any manual
+  // edit or undo invalidates it instead of leaving stale IDs in the preview.
+  if ((reason === "project" || reason === "history") && preview) {
+    const stale = preview;
+    preview = null;
+    renderPreview();
+    queueMicrotask(() => {
+      if (store.state.preview === stale) store.clearPreview();
+    });
+  }
   if (reason === "preview") {
     preview = state.preview;
     renderPreview();
@@ -195,8 +205,10 @@ async function runAI(text) {
       tone: "error",
     });
   } finally {
-    store.setAI({ busy: false, preparing: false, progress: null });
-    setBusy(false);
+    if (token === requestToken) {
+      store.setAI({ busy: false, preparing: false, progress: null });
+      setBusy(false);
+    }
   }
 }
 
@@ -323,6 +335,13 @@ function renderPreview() {
           : ""
       }
       ${preview.aiError ? `<div class="preview-edits" style="padding-top:0"><div class="notice" data-tone="warn">${icon("warn", 14)}<div>${escapeHtml(preview.aiErrorDetail || "The AI request could not be completed. Your scene is unchanged.")}</div></div></div>` : ""}
+      ${
+        preview.warnings?.length
+          ? `<div class="preview-edits" style="padding-top:0"><div class="notice" data-tone="warn">${icon("warn", 14)}<div>${preview.warnings
+              .map((warning) => escapeHtml(warning))
+              .join("<br>")}</div></div></div>`
+          : ""
+      }
       <div class="preview-actions">
         <span class="source-note">${sourceNote(preview)}</span>
         <button type="button" class="btn btn-sm" data-discard-preview>Discard</button>

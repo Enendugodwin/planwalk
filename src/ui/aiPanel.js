@@ -131,7 +131,7 @@ export function openAISettings() {
       </div>
     `,
     footer: `
-      ${initialSettings.config ? '<button type="button" class="btn btn-quiet" id="removeAI">Remove config</button>' : ""}
+      ${initialSettings.source === "browser" ? '<button type="button" class="btn btn-quiet" id="removeAI">Remove config</button>' : ""}
       <span class="spacer"></span>
       <button type="button" class="btn" data-close>Close</button>
       <button type="button" class="btn btn-primary" id="saveAI">${icon("save", 14)} Save &amp; connect</button>
@@ -227,10 +227,13 @@ export function openAISettings() {
               "afterbegin",
               '<button type="button" class="btn btn-quiet" id="removeAI">Remove config</button>'
             );
-            api.footer.querySelector("#removeAI")?.addEventListener("click", () => {
+            api.footer.querySelector("#removeAI")?.addEventListener("click", async () => {
               clearFirebaseSettings();
-              refreshAIStatus();
-              toast("AI configuration removed");
+              await refreshAIStatus();
+              const stillConfigured = store.state.ai.configured;
+              toast(stillConfigured ? "Browser config removed" : "AI configuration removed", {
+                detail: stillConfigured ? "The environment configuration is still being used." : "",
+              });
               api.close();
             });
           }
@@ -247,7 +250,10 @@ export function openAISettings() {
       api.footer.querySelector("#removeAI")?.addEventListener("click", async () => {
         clearFirebaseSettings();
         await refreshAIStatus();
-        toast("AI configuration removed");
+        const stillConfigured = store.state.ai.configured;
+        toast(stillConfigured ? "Browser config removed" : "AI configuration removed", {
+          detail: stillConfigured ? "The environment configuration is still being used." : "",
+        });
         api.close();
       });
     },

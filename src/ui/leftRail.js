@@ -132,7 +132,8 @@ export function updateLeftRail(state, reason = "change") {
 
   el.querySelector("#roomCount").textContent = String(project.rooms.length);
   const list = el.querySelector("#roomList");
-  const roomSignature = `${project.id}|${project.rooms.map((r) => `${r.id}:${r.name}:${r.w}:${r.h}:${r.measurement}`).join("|")}|${state.selection.kind}:${state.selection.id}|${project.unitSystem}`;
+  const scaleSignature = `${project.scale?.calibrated ? "1" : "0"}:${project.scale?.metersPerUnit ?? ""}`;
+  const roomSignature = `${project.id}|${scaleSignature}|${project.rooms.map((r) => `${r.id}:${r.name}:${r.w}:${r.h}:${r.measurement}`).join("|")}|${state.selection.kind}:${state.selection.id}|${project.unitSystem}`;
   if (list.dataset.signature !== roomSignature) {
     list.dataset.signature = roomSignature;
     list.innerHTML = project.rooms

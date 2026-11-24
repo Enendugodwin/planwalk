@@ -1,16 +1,8 @@
 import { store } from "../store.js";
+import { nearestWall, roomArea } from "../model/project.js";
 import {
-  nearestWall,
-  objectDisplayName,
-  openingFrame,
-  roomArea,
-  roomCenter,
-} from "../model/project.js";
-import {
-  displayLengthNumber,
   formatArea,
   formatCeiling,
-  formatLength,
   isCalibrated,
   metersPerUnit,
   scaleBar,
@@ -200,7 +192,11 @@ export class Plan2D {
     const object = this._findObjectAt(world, view);
     if (object) {
       store.selectObject(object.id);
-      this.canvas.setPointerCapture?.(event.pointerId);
+      try {
+        this.canvas.setPointerCapture?.(event.pointerId);
+      } catch {
+        /* synthetic or already-cancelled pointer */
+      }
       this.drag = {
         id: object.id,
         roomId: object.roomId,
@@ -238,21 +234,24 @@ export class Plan2D {
       };
       if (object.placement === "wall") {
         const room = project.rooms.find((r) => r.id === object.roomId);
-        if (room) {
-          const horizontal = Math.abs(Math.sin(object.rotation)) < 0.5;
-          if (horizontal) candidate.x = clamp(candidate.x, room.x + 0.1, room.x + room.w - 0.1);
-          else candidate.y = clamp(candidate.y, room.y + 0.1, room.y + room.h - 0.1);
-        }
+        if (!room) return;
+        const wall = object.wall || nearestWall(room, candidate.x, candidate.y);
+        const wallLength = wall === "n" || wall === "s" ? room.w : room.h;
+        const half = Math.min(object.dims.w / mpu, wallLength) / 2;
+        const horizontal = Math.abs(Math.sin(object.rotation)) < 0.5;
+        if (horizontal) candidate.x = clamp(candidate.x, room.x + half, room.x + room.w - half);
+        else candidate.y = clamp(candidate.y, room.y + half, room.y + room.h - half);
         // Wall items stay on their wall.
-        if (object.wall === "n") candidate.y = room.y + 0.035;
-        if (object.wall === "s") candidate.y = room.y + room.h - 0.035;
-        if (object.wall === "w") candidate.x = room.x + 0.035;
-        if (object.wall === "e") candidate.x = room.x + room.w - 0.035;
+        if (wall === "n") candidate.y = room.y + 0.035;
+        if (wall === "s") candidate.y = room.y + room.h - 0.035;
+        if (wall === "w") candidate.x = room.x + 0.035;
+        if (wall === "e") candidate.x = room.x + room.w - 0.035;
         store.updateTransient((draft) => {
           const target = draft.objects.find((o) => o.id === this.drag.id);
           if (target) {
             target.x = candidate.x;
             target.y = candidate.y;
+            target.wall = wall;
           }
         });
       } else {
@@ -287,7 +286,11 @@ export class Plan2D {
     if (!this.drag) return;
     const drag = this.drag;
     this.drag = null;
-    this.canvas.releasePointerCapture?.(event.pointerId);
+    try {
+      this.canvas.releasePointerCapture?.(event.pointerId);
+    } catch {
+      /* pointer capture may already be gone */
+    }
     if (drag.moved) {
       store.endTransient({ commit: true });
       if (drag.invalid) {

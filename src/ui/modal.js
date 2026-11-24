@@ -89,7 +89,7 @@ export function openModal(options = {}) {
     }
   }
 
-  backdrop.addEventListener("mousedown", (event) => {
+  backdrop.addEventListener("pointerdown", (event) => {
     if (event.target === backdrop && dismissible) entry.close();
   });
 

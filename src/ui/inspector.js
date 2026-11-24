@@ -7,7 +7,6 @@ import {
   OBJECT_TEXTURES,
   SURFACE_PALETTES,
   SURFACE_TEXTURES,
-  catalogLabel,
 } from "../data/catalog.js";
 import {
   canPlaceObject,
@@ -25,9 +24,7 @@ import {
   setObjectAccent,
   setObjectRotation,
   setObjectTexture,
-  setRoomAreaPreserved,
   setRoomDimsFromDisplay,
-  setRoomMeasurement,
   setSurfaceMaterial,
   updateRoomField,
 } from "../actions/design.js";
@@ -36,13 +33,12 @@ import {
   displayLengthNumber,
   formatArea,
   formatCeiling,
-  formatLength,
   isCalibrated,
   measurementLabel,
   parseCeiling,
   parseDisplayLength,
 } from "../model/units.js";
-import { roomArea, roomCenter, objectsInRoom, objectDisplayName } from "../model/project.js";
+import { roomArea, objectsInRoom, objectDisplayName } from "../model/project.js";
 import { escapeHtml, isColorHex } from "../util.js";
 import { icon } from "./icons.js";
 import { toast } from "./toast.js";
@@ -169,7 +165,6 @@ export function updateInspector(state, reason = "change") {
 
 function roomBody(project, room) {
   const unit = unitLabel(project);
-  const unit2 = isCalibrated(project) ? (project.unitSystem === "imperial" ? "ft²" : "m²") : "u²";
   const objects = objectsInRoom(project, room.id);
   return `
     <section class="insp-section">
@@ -181,21 +176,21 @@ function roomBody(project, room) {
         <div class="field">
           <label>Length</label>
           <div class="input-unit">
-            <input class="input" type="number" step="0.01" value="${inputValue(displayLengthNumber(room.w, project))}" data-room-dim="w" data-room-id="${room.id}" aria-label="Room length" />
+            <input class="input" type="number" inputmode="decimal" step="0.01" value="${inputValue(displayLengthNumber(room.w, project))}" data-room-dim="w" data-room-id="${room.id}" aria-label="Room length" />
             <span class="unit">${unit}</span>
           </div>
         </div>
         <div class="field">
           <label>Width</label>
           <div class="input-unit">
-            <input class="input" type="number" step="0.01" value="${inputValue(displayLengthNumber(room.h, project))}" data-room-dim="h" data-room-id="${room.id}" aria-label="Room width" />
+            <input class="input" type="number" inputmode="decimal" step="0.01" value="${inputValue(displayLengthNumber(room.h, project))}" data-room-dim="h" data-room-id="${room.id}" aria-label="Room width" />
             <span class="unit">${unit}</span>
           </div>
         </div>
         <div class="field">
           <label>Ceiling height</label>
           <div class="input-unit">
-            <input class="input" type="number" step="0.01" value="${inputValue(ceilingDisplayNumber(room.ceilingHeight, project))}" data-room-ceiling="${room.id}" aria-label="Ceiling height" />
+            <input class="input" type="number" inputmode="decimal" step="0.01" value="${inputValue(ceilingDisplayNumber(room.ceilingHeight, project))}" data-room-ceiling="${room.id}" aria-label="Ceiling height" />
             <span class="unit">${ceilingUnit(project)}</span>
           </div>
         </div>
@@ -351,12 +346,10 @@ function libraryCards(project) {
 }
 
 function objectBody(project, room, object) {
-  const mpu = project.scale?.metersPerUnit || 1;
   const placement = canPlaceObject(project, object);
   const catalog = CATALOG_BY_ID[object.type];
   const windowsExist = project.openings.some((o) => o.roomId === room.id && o.type === "window");
   const others = objectsInRoom(project, room.id).filter((o) => o.id !== object.id);
-  const usableColors = [...FURNITURE_COLORS, { name: "Custom", color: object.color }];
   const colorActive = (hex) => hex.toLowerCase() === object.color.toLowerCase();
 
   return `
@@ -366,42 +359,42 @@ function objectBody(project, room, object) {
         <div class="field">
           <label>Width</label>
           <div class="input-unit">
-            <input class="input" type="number" step="0.01" value="${inputValue(ceilingDisplayNumber(object.dims.w, project))}" data-object-dim="w" data-object-id="${object.id}" aria-label="Object width" />
+            <input class="input" type="number" inputmode="decimal" step="0.01" value="${inputValue(ceilingDisplayNumber(object.dims.w, project))}" data-object-dim="w" data-object-id="${object.id}" aria-label="Object width" />
             <span class="unit">${ceilingUnit(project)}</span>
           </div>
         </div>
         <div class="field">
           <label>Depth</label>
           <div class="input-unit">
-            <input class="input" type="number" step="0.01" value="${inputValue(ceilingDisplayNumber(object.dims.d, project))}" data-object-dim="d" data-object-id="${object.id}" aria-label="Object depth" />
+            <input class="input" type="number" inputmode="decimal" step="0.01" value="${inputValue(ceilingDisplayNumber(object.dims.d, project))}" data-object-dim="d" data-object-id="${object.id}" aria-label="Object depth" />
             <span class="unit">${ceilingUnit(project)}</span>
           </div>
         </div>
         <div class="field">
           <label>Height</label>
           <div class="input-unit">
-            <input class="input" type="number" step="0.01" value="${inputValue(ceilingDisplayNumber(object.dims.h, project))}" data-object-dim="h" data-object-id="${object.id}" aria-label="Object height" />
+            <input class="input" type="number" inputmode="decimal" step="0.01" value="${inputValue(ceilingDisplayNumber(object.dims.h, project))}" data-object-dim="h" data-object-id="${object.id}" aria-label="Object height" />
             <span class="unit">${ceilingUnit(project)}</span>
           </div>
         </div>
         <div class="field">
           <label>Rotation</label>
           <div class="input-unit">
-            <input class="input" type="number" step="1" value="${Math.round(((object.rotation * 180) / Math.PI + 360) % 360)}" data-object-rotation="${object.id}" aria-label="Object rotation in degrees" />
+            <input class="input" type="number" inputmode="numeric" step="1" value="${Math.round(((object.rotation * 180) / Math.PI + 360) % 360)}" data-object-rotation="${object.id}" aria-label="Object rotation in degrees" />
             <span class="unit">°</span>
           </div>
         </div>
         <div class="field">
           <label>Position X</label>
           <div class="input-unit">
-            <input class="input" type="number" step="0.01" value="${inputValue(displayLengthNumber(object.x, project))}" data-object-pos="x" data-object-id="${object.id}" aria-label="Object X position" />
+            <input class="input" type="number" inputmode="decimal" step="0.01" value="${inputValue(displayLengthNumber(object.x, project))}" data-object-pos="x" data-object-id="${object.id}" aria-label="Object X position" />
             <span class="unit">${unitLabel(project)}</span>
           </div>
         </div>
         <div class="field">
           <label>Position Y</label>
           <div class="input-unit">
-            <input class="input" type="number" step="0.01" value="${inputValue(displayLengthNumber(object.y, project))}" data-object-pos="y" data-object-id="${object.id}" aria-label="Object Y position" />
+            <input class="input" type="number" inputmode="decimal" step="0.01" value="${inputValue(displayLengthNumber(object.y, project))}" data-object-pos="y" data-object-id="${object.id}" aria-label="Object Y position" />
             <span class="unit">${unitLabel(project)}</span>
           </div>
         </div>
@@ -410,7 +403,7 @@ function objectBody(project, room, object) {
             ? `<div class="field">
                 <label>Elevation</label>
                 <div class="input-unit">
-                  <input class="input" type="number" step="0.01" value="${inputValue(ceilingDisplayNumber(object.elevation, project))}" data-object-elevation="${object.id}" aria-label="Object elevation" />
+                  <input class="input" type="number" inputmode="decimal" step="0.01" value="${inputValue(ceilingDisplayNumber(object.elevation, project))}" data-object-elevation="${object.id}" aria-label="Object elevation" />
                   <span class="unit">${ceilingUnit(project)}</span>
                 </div>
               </div>`
@@ -684,9 +677,11 @@ function onInspectorChange(event) {
   }
 
   if (el.matches("[data-room-ceiling]")) {
+    const room = project.rooms.find((r) => r.id === el.dataset.roomCeiling);
     const meters = parseCeiling(el.value, project);
     if (!meters || meters < 2.1 || meters > 5) {
       toast("Choose a ceiling height between 2.1 and 5 m", { tone: "error" });
+      if (room) el.value = inputValue(ceilingDisplayNumber(room.ceilingHeight, project));
       return;
     }
     updateRoomField(el.dataset.roomCeiling, "ceilingHeight", meters);
@@ -717,7 +712,8 @@ function onInspectorChange(event) {
   if (el.matches("[data-object-rotation]")) {
     const deg = Number(el.value);
     if (!Number.isFinite(deg)) return;
-    setObjectRotation(el.dataset.objectRotation, (deg * Math.PI) / 180);
+    const result = setObjectRotation(el.dataset.objectRotation, (deg * Math.PI) / 180);
+    if (result.message) toast("Rotation applied with a warning", { detail: result.message, tone: "error" });
     return;
   }
 
@@ -725,11 +721,17 @@ function onInspectorChange(event) {
     const object = project.objects.find((o) => o.id === el.dataset.objectId);
     if (!object) return;
     const value = parseDisplayLength(el.value, project);
-    if (value == null) return;
+    if (value == null) {
+      el.value = inputValue(displayLengthNumber(object[el.dataset.objectPos], project));
+      return;
+    }
     const x = el.dataset.objectPos === "x" ? value : object.x;
     const y = el.dataset.objectPos === "y" ? value : object.y;
     const result = setObjectPosition(object.id, x, y, "Move item");
-    if (!result.ok) toast("Move blocked", { detail: result.message, tone: "error" });
+    if (!result.ok) {
+      toast("Move blocked", { detail: result.message, tone: "error" });
+      el.value = inputValue(displayLengthNumber(object[el.dataset.objectPos], project));
+    }
     return;
   }
 
@@ -737,8 +739,11 @@ function onInspectorChange(event) {
     const object = project.objects.find((o) => o.id === el.dataset.objectElevation);
     if (!object) return;
     const value = parseCeiling(el.value, project);
-    if (value == null) return;
-    setObjectField(object.id, "elevation", Math.max(0, Math.min(4, value)), "Change mounting height");
+    if (value == null) {
+      el.value = inputValue(ceilingDisplayNumber(object.elevation, project));
+      return;
+    }
+    setObjectField(object.id, "elevation", Math.max(0, Math.min(5, value)), "Change mounting height");
     return;
   }
 
